@@ -58,9 +58,9 @@ policies.
 
 ## Quick start
 
-Browser-only mode needs macOS or Linux, Chromium or Firefox, and a ChatGPT account. It does not
-need an API key, tunnel, system Node/Bun installation, or OpenCodex. Firefox setup downloads
-Playwright's compatible Firefox build.
+Browser-only mode needs macOS or Linux x64/ARM64, Chromium or Firefox, and a ChatGPT account. It
+does not need an API key, tunnel, system Node/Bun installation, or OpenCodex. Firefox setup
+downloads Playwright's compatible Firefox build.
 
 ```bash
 curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/install.sh \
@@ -70,6 +70,10 @@ curl -fsSL https://github.com/miuuyy/codex-chatgpt-web/releases/latest/download/
 Sign in through the one browser window opened by setup, restart Codex once, and select a
 **ChatGPT Web — …** model. Pro appears only when it is available on the authenticated account.
 Normal use starts automatically after OS login and does not require another terminal command.
+
+Raspberry Pi 4/5 is supported with a 64-bit Raspberry Pi OS or Ubuntu install. Setup discovers
+common Chromium locations including `/usr/bin/chromium`; pass
+`--browser-path /path/to/chromium` if your browser is installed somewhere nonstandard.
 
 Use Firefox with:
 

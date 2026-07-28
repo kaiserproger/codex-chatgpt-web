@@ -14,13 +14,28 @@ export function browserType(engine: BrowserEngine): typeof chromium | typeof fir
   return engine === "firefox" ? firefox : chromium;
 }
 
+export function defaultChromiumExecutable(
+  platform: NodeJS.Platform = process.platform,
+  exists: (path: string) => boolean = existsSync,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (platform === "darwin") return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  if (platform === "win32") {
+    return join(env.PROGRAMFILES || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe");
+  }
+  const linuxCandidates = [
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/snap/bin/chromium",
+  ];
+  return linuxCandidates.find(candidate => exists(candidate)) ?? "/usr/bin/google-chrome";
+}
+
 export function defaultBrowserExecutable(engine: BrowserEngine): string | undefined {
   if (engine === "firefox") return undefined;
-  if (process.platform === "darwin") return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  if (process.platform === "win32") {
-    return join(process.env.PROGRAMFILES || "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe");
-  }
-  return "/usr/bin/google-chrome";
+  return defaultChromiumExecutable();
 }
 
 export function resolvedBrowserExecutable(config: {

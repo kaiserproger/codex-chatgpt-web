@@ -19,6 +19,8 @@ jobs:
             asset: codex-chatgpt-web-darwin-amd64.tar.gz
           - runner: ubuntu-latest
             asset: codex-chatgpt-web-linux-amd64.tar.gz
+          - runner: ubuntu-24.04-arm
+            asset: codex-chatgpt-web-linux-arm64.tar.gz
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6

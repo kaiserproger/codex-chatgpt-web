@@ -18,11 +18,6 @@ case "$(uname -m)" in
   x86_64) ARCH="amd64" ;;
   *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
-if [ "$OS" = "linux" ] && [ "$ARCH" = "arm64" ]; then
-  echo "Linux arm64 release assets are not published yet" >&2
-  exit 1
-fi
-
 ASSET="codex-chatgpt-web-$OS-$ARCH.tar.gz"
 BASE_URL="https://github.com/$REPOSITORY/releases/download/v$VERSION"
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-chatgpt-web.XXXXXX")"

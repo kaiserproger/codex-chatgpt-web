@@ -2,7 +2,13 @@ import { expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { browserLoginStateExists, loginToChatGpt, loginVerificationMarkerPath } from "../src/browser-login";
+import {
+  browserLoginArguments,
+  browserLoginStateExists,
+  loginToChatGpt,
+  loginVerificationMarkerPath,
+  normalLoginBrowserExecutable,
+} from "../src/browser-login";
 import { CHATGPT_TEMPORARY_CHAT_URL } from "../src/chatgpt-session";
 import { defaultConfig } from "../src/config";
 
@@ -16,7 +22,7 @@ test("login starts with normal Chrome and captures state in a headed Keychain-aw
   process.env.CODEX_LOGIN_ARG_LOG = argsLog;
   try {
     const config = defaultConfig("browser-only");
-    config.chromeExecutablePath = executable;
+    config.browserExecutablePath = executable;
     config.storageStatePath = join(root, "browser", "storage-state.json");
     await loginToChatGpt(config, { timeoutMs: 100 }).catch(() => {});
 
@@ -30,6 +36,29 @@ test("login starts with normal Chrome and captures state in a headed Keychain-aw
   } finally {
     if (previousLog === undefined) delete process.env.CODEX_LOGIN_ARG_LOG;
     else process.env.CODEX_LOGIN_ARG_LOG = previousLog;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Firefox login uses a dedicated profile without Chromium flags", () => {
+  const args = browserLoginArguments("firefox", "/tmp/firefox-profile");
+  expect(args).toEqual([
+    "-no-remote",
+    "-profile",
+    "/tmp/firefox-profile",
+    "-new-window",
+    CHATGPT_TEMPORARY_CHAT_URL,
+  ]);
+});
+
+test("Linux Firefox login uses the system browser instead of the automation build", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-chatgpt-web-system-firefox-"));
+  try {
+    const systemFirefox = join(root, "firefox");
+    writeFileSync(systemFirefox, "");
+    expect(normalLoginBrowserExecutable("firefox", "/playwright/firefox", "linux", systemFirefox)).toBe(systemFirefox);
+    expect(normalLoginBrowserExecutable("chromium", "/playwright/chromium", "linux", systemFirefox)).toBe("/playwright/chromium");
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

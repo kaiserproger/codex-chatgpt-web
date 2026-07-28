@@ -5,7 +5,13 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildResponseJSON } from "../src/bridge";
-import { ChatGptCompletionTracker, chatGptImageFilePayloads, chatGptPromptFilePayloads, chatGptTurnIsComplete } from "../src/adapters/chatgpt-web/browser-worker";
+import {
+  ChatGptCompletionTracker,
+  chatGptComposerTextMatchesPrompt,
+  chatGptImageFilePayloads,
+  chatGptPromptFilePayloads,
+  chatGptTurnIsComplete,
+} from "../src/adapters/chatgpt-web/browser-worker";
 import { ChatGptBrowserWorker, type BrowserTurn } from "../src/adapters/chatgpt-web/browser-worker";
 import { extractChatGptTurnEnvironment, extractChatGptTurnIdentity } from "../src/adapters/chatgpt-web/environment";
 import { createChatGptWebAdapter } from "../src/adapters/chatgpt-web/index";
@@ -28,6 +34,9 @@ const tools: CodexTool[] = [
   { name: "write_stdin", description: "Continue command", parameters: { type: "object" } },
   { name: "apply_patch", description: "Patch files", parameters: {}, freeform: true },
   { name: "view_image", description: "View image", parameters: { type: "object" } },
+  { name: "get_goal", description: "Read the current persistent goal", parameters: { type: "object" } },
+  { name: "create_goal", description: "Create a persistent goal", parameters: { type: "object" } },
+  { name: "update_goal", description: "Update the current persistent goal", parameters: { type: "object" } },
   { name: "search_openai_docs", namespace: "mcp__openaiDeveloperDocs", description: "Search docs", parameters: { type: "object" } },
 ];
 
@@ -94,6 +103,15 @@ function toolResult(value: Record<string, unknown>): BrokerToolResult {
 }
 
 describe("ChatGPT outer-native harness v3", () => {
+  test("accepts only the composer's newline-to-space canonicalization", () => {
+    expect(chatGptComposerTextMatchesPrompt("first\nsecond", "first\nsecond")).toBe(true);
+    expect(chatGptComposerTextMatchesPrompt("first second", "first\nsecond")).toBe(true);
+    expect(chatGptComposerTextMatchesPrompt("first  second", "first\n\nsecond")).toBe(true);
+    expect(chatGptComposerTextMatchesPrompt("first changed", "first\nsecond")).toBe(false);
+    expect(chatGptComposerTextMatchesPrompt("first second", "first\r\nsecond")).toBe(false);
+    expect(chatGptComposerTextMatchesPrompt("first second", "first\rsecond")).toBe(false);
+  });
+
   test("extracts authoritative environment, tool registry, and turn identity from the Codex wire envelope", () => {
     const request = rawWireRequest(environmentXml);
     expect(extractChatGptTurnEnvironment(request)).toEqual({
@@ -285,6 +303,7 @@ describe("ChatGPT outer-native harness v3", () => {
 
     expect(compiled.text).toContain("d".repeat(70_000));
     expect(compiled.text).toContain("<codex_context_json>");
+    expect(compiled.text).toContain("Do not use nested local-agent workspace connectors");
     expect(files.map(file => file.name)).toEqual(["codex-input-image-1.png"]);
     expect(files[0]!.mimeType).toBe("image/png");
   });
@@ -772,7 +791,7 @@ describe("ChatGPT outer-native harness v3", () => {
     const broker = TurnBroker.forSocket(socketPath);
     const gatewayOnlyEnvironment = extractChatGptTurnEnvironment(parsed(environmentXml));
     gatewayOnlyEnvironment.tools = gatewayOnlyEnvironment.tools.filter(tool => (
-      tool.name === "exec" || tool.name === "search_openai_docs"
+      ["exec", "search_openai_docs", "get_goal", "create_goal", "update_goal"].includes(tool.name)
     ));
     const token = await broker.register(gatewayOnlyEnvironment, 60_000);
     const transport = new StdioClientTransport({
@@ -808,6 +827,10 @@ describe("ChatGPT outer-native harness v3", () => {
       const discovered = (inventory.structuredContent as { tools: Array<{ wire_name: string }> }).tools;
       expect(discovered.map(tool => tool.wire_name)).toEqual(["mcp__openaiDeveloperDocs__search_openai_docs"]);
 
+      const goalInventory = await call("codex_tool_inventory", { binding_id: bindingId, query: "goal" });
+      const goalTools = (goalInventory.structuredContent as { tools: Array<{ wire_name: string }> }).tools;
+      expect(goalTools.map(tool => tool.wire_name)).toEqual(["get_goal", "create_goal", "update_goal"]);
+
       const execPromise = call("codex_exec", { binding_id: bindingId, cmd: "pwd", workdir: tempRoot });
       const [execRequest] = await broker.nextToolBatch(token);
       expect(execRequest).toMatchObject({ wireName: "exec", freeform: true });
@@ -833,6 +856,17 @@ describe("ChatGPT outer-native harness v3", () => {
       expect(docsRequest?.input).toContain('tools["mcp__openaiDeveloperDocs__search_openai_docs"]({"query":"Responses API"})');
       broker.completeTool(token, docsRequest!.callId, toolResult({ hits: 3 }));
       expect((await docsPromise).structuredContent).toEqual({ hits: 3 });
+
+      const goalPromise = call("codex_tool_call", {
+        binding_id: bindingId,
+        wire_name: "get_goal",
+        arguments: {},
+      });
+      const [goalRequest] = await broker.nextToolBatch(token);
+      expect(goalRequest).toMatchObject({ wireName: "exec", freeform: true });
+      expect(goalRequest?.input).toContain('tools["get_goal"]({})');
+      broker.completeTool(token, goalRequest!.callId, toolResult({ status: "active" }));
+      expect((await goalPromise).structuredContent).toEqual({ status: "active" });
     } finally {
       await client.close().catch(() => {});
       broker.revoke(token);

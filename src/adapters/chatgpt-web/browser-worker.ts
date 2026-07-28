@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { chromium, type Browser, type BrowserContext, type Locator, type Page } from "playwright-core";
+import type { Browser, BrowserContext, Locator, Page } from "playwright-core";
 import { atomicWriteFile, expandUserPath, getConfigDir } from "../../config";
 import type { CodexProviderConfig } from "../../types";
+import { browserName, browserType, defaultBrowserExecutable, resolvedBrowserExecutable, type BrowserEngine } from "../../browser-engine";
 import { parseDataUrl } from "../image";
 import { ChatGptMarkdownStream } from "./markdown";
 import { resolveChatGptWebModelMode, type ChatGptWebCapabilities, type ChatGptWebModelMode } from "./model";
@@ -28,6 +29,11 @@ const browserStageTimeouts = {
   send: 20_000,
 } as const;
 
+export function chatGptComposerTextMatchesPrompt(observed: string, prompt: string): boolean {
+  const canonical = (text: string): string => text.replaceAll("\n", " ");
+  return canonical(observed) === canonical(prompt);
+}
+
 export interface BrowserTurn {
   traceId: string;
   modelId: string;
@@ -47,7 +53,8 @@ export interface BrowserTurn {
 interface ResolvedBrowserConfig {
   appName: string;
   storageStatePath: string;
-  chromeExecutablePath: string;
+  browserEngine: BrowserEngine;
+  browserExecutablePath: string;
   turnTimeoutMs: number;
   headed: boolean;
   autoApproveToolCalls: boolean;
@@ -237,10 +244,14 @@ export function redactChatGptUiDiagnostic(value: string): string {
 
 function resolveBrowserConfig(provider: CodexProviderConfig): ResolvedBrowserConfig {
   const configured = provider.chatgptWeb ?? {};
+  const browserEngine = configured.browserEngine ?? "chromium";
+  const configuredPath = configured.browserExecutablePath?.trim() || configured.chromeExecutablePath?.trim()
+    || defaultBrowserExecutable(browserEngine);
   return {
     appName: configured.appName?.trim() || "Codex Native",
     storageStatePath: resolve(expandUserPath(configured.storageStatePath?.trim() || join(getConfigDir(), "browser", "storage-state.json"))),
-    chromeExecutablePath: resolve(expandUserPath(configured.chromeExecutablePath?.trim() || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")),
+    browserEngine,
+    browserExecutablePath: resolve(expandUserPath(configuredPath || resolvedBrowserExecutable({ browserEngine }))),
     turnTimeoutMs: configured.turnTimeoutMs ?? DEFAULT_CHATGPT_TURN_TIMEOUT_MS,
     headed: configured.headed !== false,
     autoApproveToolCalls: configured.autoApproveToolCalls === true,
@@ -351,11 +362,11 @@ export class ChatGptBrowserWorker {
     if (!existsSync(this.config.storageStatePath) || !existsSync(loginVerificationMarkerPath(this.config.storageStatePath))) {
       throw new Error(`ChatGPT web login state is missing: ${this.config.storageStatePath}`);
     }
-    if (!existsSync(this.config.chromeExecutablePath)) {
-      throw new Error(`Configured Chrome executable does not exist: ${this.config.chromeExecutablePath}`);
+    if (!existsSync(this.config.browserExecutablePath)) {
+      throw new Error(`Configured ${browserName(this.config.browserEngine)} executable does not exist: ${this.config.browserExecutablePath}`);
     }
-    this.browser = await chromium.launch({
-      executablePath: this.config.chromeExecutablePath,
+    this.browser = await browserType(this.config.browserEngine).launch({
+      executablePath: this.config.browserExecutablePath,
       headless: !this.config.headed,
     });
     this.context = await this.browser.newContext({ storageState: this.config.storageStatePath });
@@ -448,7 +459,7 @@ export class ChatGptBrowserWorker {
     let observed = "";
     while (Date.now() < deadline) {
       observed = await this.attachedPromptText(page);
-      if (observed === prompt) return;
+      if (chatGptComposerTextMatchesPrompt(observed, prompt)) return;
       await new Promise(resolveSleep => setTimeout(resolveSleep, 50));
     }
     let commonPrefix = 0;
